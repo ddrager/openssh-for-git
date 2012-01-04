@@ -1,0 +1,206 @@
+diff -ru openssh-5.9p1/auth2-pubkey.c openssh-5.9p1-patched/auth2-pubkey.c
+--- openssh-5.9p1/auth2-pubkey.c	2011-05-29 20:39:38.000000000 +0900
++++ openssh-5.9p1-patched/auth2-pubkey.c	2012-01-04 09:35:21.099076049 +0900
+@@ -432,6 +432,97 @@
+ 	return ret;
+ }
+ 
++/* check to see if the script specified by file can authorize the key
++ *
++ * the script will have the key written to STDIN, which is identical
++ * to the normal public key format.
++ *
++ * the script must exit with either 0 for success or 1 for failure.
++ * the script can print login options (if any) to STDOUT. No whitepace should be added
++ * to the output.
++ *
++ * Use with caution: the script can hang sshd. It is recommended you code the script
++ * with a timeout set if it cannot determine authenication quickly.
++ */
++static int
++user_key_found_by_script(struct passwd *pw, Key *key, char *file)
++{
++	pid_t pid;
++	char line[SSH_MAX_PUBKEY_BYTES];
++	int pipe_in[2];
++	int pipe_out[2];
++	int exit_code = 1;
++	int success = 0;
++	FILE *f;
++	//mysig_t oldsig;
++
++	pipe(pipe_in);
++	pipe(pipe_out);
++
++	//oldsig = signal(SIGCHLD, SIG_IGN);
++	temporarily_use_uid(pw);
++
++	debug3("user_key_found_by_script: executing %s", file);
++
++	switch ((pid = fork())) {
++	case -1:
++		error("fork(): %s", strerror(errno));
++		restore_uid();
++		return (-1);
++	case 0:
++		/* setup input pipe */
++		close(pipe_in[1]);
++		dup2(pipe_in[0], 0);
++		close(pipe_in[0]);
++
++		/* setup output pipe */
++		close(pipe_out[0]);
++		dup2(pipe_out[1], 1);
++		close(pipe_out[1]);
++
++		execl(file, file, NULL);
++
++		/* exec failed */
++		error("execl(): %s", strerror(errno));
++		_exit(1);
++	default:
++		debug3("user_key_found_by_script: script pid %d", pid);
++
++		close(pipe_in[0]);
++		close(pipe_out[1]);
++
++		f = fdopen(pipe_in[1], "w");
++		key_write(key, f);
++		fclose(f);
++
++		while(waitpid(pid, &exit_code, 0) < 0) {
++			switch(errno) {
++			case EINTR:
++				debug3("user_key_found_by_script: waitpid() EINTR, continuing");
++				continue;
++			default:
++				error("waitpid(): %s", strerror(errno));
++				goto waitpid_error;
++			}
++		}
++		if (WIFEXITED(exit_code) && WEXITSTATUS(exit_code) == 0) {
++			int amt_read = read(pipe_out[0], line, sizeof(line) - 1);
++			line[amt_read] = ' ';
++			line[amt_read + 1] = 0;
++			debug3("user_key_found_by_script: options: %s", line);
++			if (auth_parse_options(pw, line, file, 0) == 1)
++				success = 1;
++		}
++	 waitpid_error:
++		close(pipe_out[0]);
++	}
++
++	restore_uid();
++	//signal(SIGCHLD, oldsig);
++
++	return success;
++}
++
+ /* check whether given key is in .ssh/authorized_keys* */
+ int
+ user_key_allowed(struct passwd *pw, Key *key)
+@@ -453,8 +544,16 @@
+ 		    options.authorized_keys_files[i], pw);
+ 		success = user_key_allowed2(pw, key, file);
+ 		xfree(file);
++                if (success)
++                    return success;
+ 	}
+ 
++        /* try the script to find the key */
++        if ((file = authorized_keys_script(pw))) {
++            success = user_key_found_by_script(pw, key, file);
++            xfree(file);
++        }
++
+ 	return success;
+ }
+ 
+diff -ru openssh-5.9p1/auth.c openssh-5.9p1-patched/auth.c
+--- openssh-5.9p1/auth.c	2011-05-29 20:40:42.000000000 +0900
++++ openssh-5.9p1-patched/auth.c	2012-01-04 09:31:10.925075597 +0900
+@@ -362,6 +362,15 @@
+ 	return expand_authorized_keys(options.authorized_principals_file, pw);
+ }
+ 
++char *
++authorized_keys_script(struct passwd *pw)
++{
++	if (options.authorized_keys_script)
++		return expand_authorized_keys(options.authorized_keys_script, pw);
++	else
++		return NULL;
++}
++
+ /* return ok if key exists in sysfile or userfile */
+ HostStatus
+ check_key_in_hostfiles(struct passwd *pw, Key *key, const char *host,
+diff -ru openssh-5.9p1/auth.h openssh-5.9p1-patched/auth.h
+--- openssh-5.9p1/auth.h	2011-05-29 20:39:38.000000000 +0900
++++ openssh-5.9p1-patched/auth.h	2012-01-04 09:36:29.228079132 +0900
+@@ -170,6 +170,7 @@
+ 
+ char	*expand_authorized_keys(const char *, struct passwd *pw);
+ char	*authorized_principals_file(struct passwd *);
++char	*authorized_keys_script(struct passwd *);
+ 
+ FILE	*auth_openkeyfile(const char *, struct passwd *, int);
+ FILE	*auth_openprincipals(const char *, struct passwd *, int);
+diff -ru openssh-5.9p1/servconf.c openssh-5.9p1-patched/servconf.c
+--- openssh-5.9p1/servconf.c	2011-06-23 07:30:03.000000000 +0900
++++ openssh-5.9p1-patched/servconf.c	2012-01-04 09:39:45.280074926 +0900
+@@ -136,6 +136,7 @@
+ 	options->revoked_keys_file = NULL;
+ 	options->trusted_user_ca_keys = NULL;
+ 	options->authorized_principals_file = NULL;
++	options->authorized_keys_script = NULL;
+ 	options->ip_qos_interactive = -1;
+ 	options->ip_qos_bulk = -1;
+ }
+@@ -318,6 +319,7 @@
+ 	sBanner, sUseDNS, sHostbasedAuthentication,
+ 	sHostbasedUsesNameFromPacketOnly, sClientAliveInterval,
+ 	sClientAliveCountMax, sAuthorizedKeysFile,
++	sAuthorizedKeysScript,
+ 	sGssAuthentication, sGssCleanupCreds, sAcceptEnv, sPermitTunnel,
+ 	sMatch, sPermitOpen, sForceCommand, sChrootDirectory,
+ 	sUsePrivilegeSeparation, sAllowAgentForwarding,
+@@ -435,6 +437,7 @@
+ 	{ "clientalivecountmax", sClientAliveCountMax, SSHCFG_GLOBAL },
+ 	{ "authorizedkeysfile", sAuthorizedKeysFile, SSHCFG_ALL },
+ 	{ "authorizedkeysfile2", sDeprecated, SSHCFG_ALL },
++	{ "authorizedkeysscript", sAuthorizedKeysScript, SSHCFG_ALL },
+ 	{ "useprivilegeseparation", sUsePrivilegeSeparation, SSHCFG_GLOBAL},
+ 	{ "acceptenv", sAcceptEnv, SSHCFG_GLOBAL },
+ 	{ "permittunnel", sPermitTunnel, SSHCFG_ALL },
+@@ -1267,6 +1270,10 @@
+ 		}
+ 		break;
+ 
++	case sAuthorizedKeysScript:
++		charptr = &options->authorized_keys_script;
++		goto parse_filename;
++
+ 	case sClientAliveInterval:
+ 		intptr = &options->client_alive_interval;
+ 		goto parse_time;
+@@ -1758,6 +1765,7 @@
+ 	dump_cfg_string(sRevokedKeys, o->revoked_keys_file);
+ 	dump_cfg_string(sAuthorizedPrincipalsFile,
+ 	    o->authorized_principals_file);
++	dump_cfg_string(sAuthorizedKeysScript, o->authorized_keys_script);
+ 
+ 	/* string arguments requiring a lookup */
+ 	dump_cfg_string(sLogLevel, log_level_name(o->log_level));
+diff -ru openssh-5.9p1/servconf.h openssh-5.9p1-patched/servconf.h
+--- openssh-5.9p1/servconf.h	2011-06-23 07:30:03.000000000 +0900
++++ openssh-5.9p1-patched/servconf.h	2012-01-04 09:31:10.928076038 +0900
+@@ -154,6 +154,8 @@
+ 	u_int num_authkeys_files;	/* Files containing public keys */
+ 	char   *authorized_keys_files[MAX_AUTHKEYS_FILES];
+ 
++	char   *authorized_keys_script;
++
+ 	char   *adm_forced_command;
+ 
+ 	int	use_pam;		/* Enable auth via PAM */
