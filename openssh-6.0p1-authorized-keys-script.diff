@@ -31,7 +31,7 @@ index 568212f..f08502f 100644
  FILE	*auth_openkeyfile(const char *, struct passwd *, int);
  FILE	*auth_openprincipals(const char *, struct passwd *, int);
 diff --git a/auth2-pubkey.c b/auth2-pubkey.c
-index d42ba14..d0a7eb8 100644
+index d42ba14..19819ba 100644
 --- a/auth2-pubkey.c
 +++ b/auth2-pubkey.c
 @@ -437,6 +437,97 @@ user_cert_trusted_ca(struct passwd *pw, Key *key)
@@ -86,7 +86,7 @@ index d42ba14..d0a7eb8 100644
 +		dup2(pipe_out[1], 1);
 +		close(pipe_out[1]);
 +
-+		execl(file, file, NULL);
++		execl(file, file, pw->pw_name, NULL);
 +
 +		/* exec failed */
 +		error("execl(): %s", strerror(errno));
