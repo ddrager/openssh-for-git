@@ -1,0 +1,28 @@
+Debian Way
+----------
+
+sudo apt-get install devscripts
+sudo apt-get build-dep openssh-server
+mkdir openssh
+cd openssh
+apt-get source openssh-server
+cd openssh-6.0p1
+patch -p1 < openssh-6.0p1-debian-authorized-keys-script.diff
+dpkg-source --commit . authorized-keys-script.patch
+sudo debuild -us -uc
+
+Standard Way
+------------
+
+# download openssh-6.0p1 source
+cd openssh-6.0p1
+patch -p1 < openssh-6.0p1-authorized-keys-script.diff
+./configure 
+make -j 4
+
+# choose to do a standard install
+make install
+
+# or create a .deb package
+sudo checkinstall --fstrans=no make install
+
