@@ -1,8 +1,8 @@
 diff --git a/auth.c b/auth.c
-index cd95da9..6b01ffc 100644
+index 3e8fe57..c7ec40f 100644
 --- a/auth.c
 +++ b/auth.c
-@@ -362,6 +362,15 @@ authorized_principals_file(struct passwd *pw)
+@@ -363,6 +363,15 @@ authorized_principals_file(struct passwd *pw)
  	return expand_authorized_keys(options.authorized_principals_file, pw);
  }
  
@@ -19,22 +19,22 @@ index cd95da9..6b01ffc 100644
  HostStatus
  check_key_in_hostfiles(struct passwd *pw, Key *key, const char *host,
 diff --git a/auth.h b/auth.h
-index 0d786c4..caf04cf 100644
+index 568212f..f08502f 100644
 --- a/auth.h
 +++ b/auth.h
-@@ -170,6 +170,7 @@ void	abandon_challenge_response(Authctxt *);
+@@ -171,6 +171,7 @@ void	abandon_challenge_response(Authctxt *);
  
  char	*expand_authorized_keys(const char *, struct passwd *pw);
  char	*authorized_principals_file(struct passwd *);
-+char	*authorized_keys_script(struct passwd *);
++char   *authorized_keys_script(struct passwd *);
  
  FILE	*auth_openkeyfile(const char *, struct passwd *, int);
  FILE	*auth_openprincipals(const char *, struct passwd *, int);
 diff --git a/auth2-pubkey.c b/auth2-pubkey.c
-index 5bccb5d..a8f9dab 100644
+index d42ba14..19819ba 100644
 --- a/auth2-pubkey.c
 +++ b/auth2-pubkey.c
-@@ -433,6 +433,97 @@ user_cert_trusted_ca(struct passwd *pw, Key *key)
+@@ -437,6 +437,97 @@ user_cert_trusted_ca(struct passwd *pw, Key *key)
  	return ret;
  }
  
@@ -132,7 +132,7 @@ index 5bccb5d..a8f9dab 100644
  /* check whether given key is in .ssh/authorized_keys* */
  int
  user_key_allowed(struct passwd *pw, Key *key)
-@@ -454,6 +545,15 @@ user_key_allowed(struct passwd *pw, Key *key)
+@@ -459,6 +550,14 @@ user_key_allowed(struct passwd *pw, Key *key)
  		    options.authorized_keys_files[i], pw);
  		success = user_key_allowed2(pw, key, file);
  		xfree(file);
@@ -144,31 +144,30 @@ index 5bccb5d..a8f9dab 100644
 +	if ((file = authorized_keys_script(pw))) {
 +		success = user_key_found_by_script(pw, key, file);
 +		xfree(file);
-+
  	}
  
  	return success;
 diff --git a/servconf.c b/servconf.c
-index 8ec5ca0..3517dcb 100644
+index 5b3f6f5..361c09b 100644
 --- a/servconf.c
 +++ b/servconf.c
-@@ -136,6 +136,7 @@ initialize_server_options(ServerOptions *options)
+@@ -140,6 +140,7 @@ initialize_server_options(ServerOptions *options)
  	options->revoked_keys_file = NULL;
  	options->trusted_user_ca_keys = NULL;
  	options->authorized_principals_file = NULL;
 +	options->authorized_keys_script = NULL;
  	options->ip_qos_interactive = -1;
  	options->ip_qos_bulk = -1;
- }
-@@ -318,6 +319,7 @@ typedef enum {
+ 	options->debian_banner = -1;
+@@ -333,6 +334,7 @@ typedef enum {
  	sBanner, sUseDNS, sHostbasedAuthentication,
  	sHostbasedUsesNameFromPacketOnly, sClientAliveInterval,
  	sClientAliveCountMax, sAuthorizedKeysFile,
 +	sAuthorizedKeysScript,
- 	sGssAuthentication, sGssCleanupCreds, sAcceptEnv, sPermitTunnel,
- 	sMatch, sPermitOpen, sForceCommand, sChrootDirectory,
- 	sUsePrivilegeSeparation, sAllowAgentForwarding,
-@@ -435,6 +437,7 @@ static struct {
+ 	sGssAuthentication, sGssCleanupCreds, sGssStrictAcceptor,
+ 	sGssKeyEx, sGssStoreRekey,
+ 	sAcceptEnv, sPermitTunnel,
+@@ -464,6 +466,7 @@ static struct {
  	{ "clientalivecountmax", sClientAliveCountMax, SSHCFG_GLOBAL },
  	{ "authorizedkeysfile", sAuthorizedKeysFile, SSHCFG_ALL },
  	{ "authorizedkeysfile2", sDeprecated, SSHCFG_ALL },
@@ -176,7 +175,7 @@ index 8ec5ca0..3517dcb 100644
  	{ "useprivilegeseparation", sUsePrivilegeSeparation, SSHCFG_GLOBAL},
  	{ "acceptenv", sAcceptEnv, SSHCFG_GLOBAL },
  	{ "permittunnel", sPermitTunnel, SSHCFG_ALL },
-@@ -1267,6 +1270,10 @@ process_server_config_line(ServerOptions *options, char *line,
+@@ -1313,6 +1316,10 @@ process_server_config_line(ServerOptions *options, char *line,
  		}
  		break;
  
@@ -187,7 +186,7 @@ index 8ec5ca0..3517dcb 100644
  	case sClientAliveInterval:
  		intptr = &options->client_alive_interval;
  		goto parse_time;
-@@ -1758,6 +1765,7 @@ dump_config(ServerOptions *o)
+@@ -1812,6 +1819,7 @@ dump_config(ServerOptions *o)
  	dump_cfg_string(sRevokedKeys, o->revoked_keys_file);
  	dump_cfg_string(sAuthorizedPrincipalsFile,
  	    o->authorized_principals_file);
@@ -196,10 +195,10 @@ index 8ec5ca0..3517dcb 100644
  	/* string arguments requiring a lookup */
  	dump_cfg_string(sLogLevel, log_level_name(o->log_level));
 diff --git a/servconf.h b/servconf.h
-index 89f38e2..bfdcc26 100644
+index 0be15f0..22b92c2 100644
 --- a/servconf.h
 +++ b/servconf.h
-@@ -154,6 +154,8 @@ typedef struct {
+@@ -158,6 +158,8 @@ typedef struct {
  	u_int num_authkeys_files;	/* Files containing public keys */
  	char   *authorized_keys_files[MAX_AUTHKEYS_FILES];
  
