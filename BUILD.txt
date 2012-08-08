@@ -1,22 +1,37 @@
 Debian Way
 ----------
 
+# install dependencies and devscripts
 sudo apt-get install devscripts
 sudo apt-get build-dep openssh-server
+
+# get the source
 mkdir openssh
 cd openssh
 apt-get source openssh-server
+
+# apply patch
 cd openssh-6.0p1
+# Squeeze
+patch -p1 < openssh-5.5p1-debian-authorized-keys-script.diff
+# or Wheezy
 patch -p1 < openssh-6.0p1-debian-authorized-keys-script.diff
+
+# commit the patch (only on Wheezy)
 dpkg-source --commit . authorized-keys-script.patch
+
+# build the package
 sudo debuild -us -uc
 
 Standard Way
 ------------
 
 # download openssh-6.0p1 source
+# apply patch
 cd openssh-6.0p1
 patch -p1 < openssh-6.0p1-authorized-keys-script.diff
+
+# compile
 ./configure 
 make -j 4
 
