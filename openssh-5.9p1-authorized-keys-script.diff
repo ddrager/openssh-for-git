@@ -53,7 +53,7 @@ diff -ru openssh-5.9p1/auth2-pubkey.c openssh-5.9p1-patched/auth2-pubkey.c
 +		dup2(pipe_out[1], 1);
 +		close(pipe_out[1]);
 +
-+		execl(file, file, NULL);
++		execl(file, file, pw->pw_name, NULL);
 +
 +		/* exec failed */
 +		error("execl(): %s", strerror(errno));

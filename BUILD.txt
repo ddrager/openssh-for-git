@@ -11,7 +11,7 @@ cd openssh
 apt-get source openssh-server
 
 # apply patch
-cd openssh-6.0p1
+cd openssh-?.?p1
 # Squeeze
 patch -p1 < openssh-5.5p1-debian-authorized-keys-script.diff
 # or Wheezy
